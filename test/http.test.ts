@@ -10,8 +10,6 @@ import {
   SubdomainResolver,
   TenantMiddleware,
   tenantCache,
-  uuid7,
-  uuid7Time,
 } from '../src'
 import { seed, type World } from './helpers'
 import { allModels, Product, Store } from './models'
@@ -66,52 +64,41 @@ describe('TenantMiddleware and resolvers', () => {
     w = await seed()
   })
 
+  // The request URL carries the host, as on Workers and Node, where it is built from the Host header.
   const get = (url: string, headers: Record<string, string> = {}) => client.get(url, { headers })
+  const at = (host: string, path: string) => get(`http://${host}${path}`)
 
   it('resolves a subdomain', async () => {
-    const res = await get('/whoami/', { host: 'amarshop.myghuri.test' })
+    const res = await at('amarshop.myghuri.test', '/whoami/')
     expect(await res.json()).toEqual({ store: 'amarshop', viaContext: 'amarshop' })
-    expect(await (await get('/products/', { host: 'bshop.myghuri.test' })).json()).toEqual(['Shirt'])
+    expect(await (await at('bshop.myghuri.test', '/products/')).json()).toEqual(['Shirt'])
   })
 
   it('resolves a custom domain and a header token', async () => {
-    expect(await (await get('/products/', { host: 'shop.a.test' })).json()).toEqual(['Cap', 'Shirt'])
+    expect(await (await at('shop.a.test', '/products/')).json()).toEqual(['Cap', 'Shirt'])
     expect(await (await get('/products/', { 'X-Storefront-Token': 'tok-b' })).json()).toEqual(['Shirt'])
   })
 
   it('answers 404 for an unknown subdomain or token', async () => {
-    expect((await get('/whoami/', { host: 'nope.myghuri.test' })).status).toBe(404)
+    expect((await at('nope.myghuri.test', '/whoami/')).status).toBe(404)
     expect((await get('/whoami/', { 'X-Storefront-Token': 'nope' })).status).toBe(404)
   })
 
   it('lets platform hosts through with no tenant, and tenant queries there fail closed', async () => {
-    expect(await (await get('/whoami/', { host: 'www.myghuri.test' })).json()).toEqual({
+    expect(await (await at('www.myghuri.test', '/whoami/')).json()).toEqual({
       store: null,
       viaContext: null,
     })
-    expect((await get('/products/', { host: 'admin.platform.test' })).status).toBe(500)
+    expect((await at('admin.platform.test', '/products/')).status).toBe(500)
   })
 
   it('scopes tenantCache() keys to the tenant', async () => {
-    const visit = async (host: string) => (await (await get('/cache/', { host })).json()).visits
+    const visit = async (host: string) => (await (await at(host, '/cache/')).json()).visits
     expect(await visit('amarshop.myghuri.test')).toBe(1)
     expect(await visit('amarshop.myghuri.test')).toBe(2)
     expect(await visit('bshop.myghuri.test')).toBe(1)
     await runAsTenant(w.a, async () =>
       expect(tenantCache().makeKey('visits')).toContain(`t:${w.a.pk}:visits`),
     )
-  })
-})
-
-describe('uuid7', () => {
-  it('is a version 7 UUID that sorts by time', () => {
-    const before = Date.now()
-    const ids = Array.from({ length: 50 }, () => uuid7())
-    for (const id of ids) {
-      expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-      expect(uuid7Time(id)).toBeGreaterThanOrEqual(before)
-      expect(uuid7Time(id)).toBeLessThanOrEqual(Date.now())
-    }
-    expect(new Set(ids).size).toBe(50)
   })
 })

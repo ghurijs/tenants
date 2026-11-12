@@ -1,3 +1,4 @@
+import { getHost } from '@ghuri/core'
 import { isModelClass, type ModelClass } from '@ghuri/orm'
 import type { Context } from 'hono'
 import type { TenantLike } from './context'
@@ -42,10 +43,13 @@ async function lookup(opts: LookupOptions, field: string, value: string): Promis
   }
 }
 
-/** The request host, lower-cased, without port or trailing dot. */
+/**
+ * The request host, lower-cased, without port or trailing dot. It is `@ghuri/core`'s `getHost(c)` (the host CSRF
+ * and `ALLOWED_HOSTS` checks use), normalised: the request URL's host, which Workers and `@ghuri/core/node` take
+ * from the `Host` header; `X-Forwarded-Host` only when the `USE_X_FORWARDED_HOST` setting is true, as in Django.
+ */
 export function requestHost(c: Context): string {
-  const raw = c.req.header('x-forwarded-host') ?? c.req.header('host') ?? new URL(c.req.url).host
-  return raw.split(',')[0].trim().toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '')
+  return getHost(c).trim().toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '')
 }
 
 /**
