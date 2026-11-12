@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.2
 
 - **Behaviour change:** `requestHost()`, and so `SubdomainResolver` and `HostResolver`, no longer trust
   `X-Forwarded-Host` unconditionally. They now read the host exactly as `@ghuri/core`'s `getHost()` does (the
