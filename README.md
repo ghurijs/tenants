@@ -7,7 +7,7 @@ queries **fail closed** instead of returning every tenant's rows.
 Works the same on D1, SQLite and Postgres: one database, one migration run, and the same models after a
 `dumpdata` / `loaddata` move from D1 to Postgres.
 
-> Status: alpha (`0.1.0-alpha.0`). APIs may change.
+> Status: alpha (`0.1.0-alpha.1`). APIs may change.
 
 ```sh
 npm install @ghuri/tenants@next
