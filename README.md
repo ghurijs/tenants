@@ -175,6 +175,12 @@ tenant, `null` (not tenant traffic, so the next resolver is tried), or throws `T
 | `HostResolver({ field = 'domain' })` | The whole host, for custom domains | `null` |
 | `async (c) => tenant \| null` | Anything | Your choice |
 
+`SubdomainResolver` and `HostResolver` read the host with `requestHost(c)`: `@ghuri/core`'s `getHost(c)` (the host
+the CSRF and `ALLOWED_HOSTS` checks use), lower-cased, without port or trailing dot. That is the request URL's host,
+which Workers and `@ghuri/core/node` take from the `Host` header. `X-Forwarded-Host` is used only with
+`USE_X_FORWARDED_HOST: true`, as in Django: set it only behind a proxy that overwrites the header, or any client
+could pick its tenant. In tests, put the host in the URL: `client.get('http://amarshop.myghuri.test/')`.
+
 Every resolver takes `filter` (`{ isActive: true }`) and `model` (default `TENANTS.MODEL`). With no tenant found
 the request runs without one, so platform routes keep working, unless `TENANTS.REQUIRED` (or
 `new TenantMiddleware({ required: true })`) asks for a 404. The tenant is also `c.get('tenant')`.
@@ -220,7 +226,11 @@ await cache.getOrSet('menu', () => buildMenu(), 300)
 
 **UUIDv7.** `uuid7()` returns a time-ordered UUID (RFC 9562), and `uuid7Time(id)` reads its timestamp back. With
 `uuidPk: true`, keys stay unique across databases, so one tenant can later move to its own database without
-clashes.
+clashes. Ids from one process (a Worker isolate, a Node process) are strictly increasing, also within one
+millisecond (a counter seeded randomly each millisecond, RFC 9562 §6.2), so `orderBy('id')` keeps insertion order
+for rows created together, such as order lines. Ids from different processes are ordered by time only.
+`uuid7Time()` can be slightly ahead of the wall clock: after the system clock steps back the last timestamp is
+reused, and after more than 2^41 ids in one millisecond the timestamp field is advanced by one.
 
 **GraphQL, REST and agents.** They all read through the model's default manager, so they are scoped with no
 per-type code:
