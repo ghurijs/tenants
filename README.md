@@ -20,7 +20,7 @@ npm install @ghuri/tenants@next
 3. [The current tenant](#3-the-current-tenant)
 4. [Finding the tenant of a request](#4-finding-the-tenant-of-a-request)
 5. [What is checked](#5-what-is-checked)
-6. [Cache, UUIDv7 keys, GraphQL and REST](#6-cache-uuidv7-keys-graphql-and-rest)
+6. [Cache, UUIDv7 keys, GraphQL, REST and agents](#6-cache-uuidv7-keys-graphql-rest-and-agents)
 7. [Testing for leaks](#7-testing-for-leaks)
 8. [Limits](#8-limits)
 
@@ -98,11 +98,47 @@ Options:
 | `to` | `TENANTS.MODEL` | The tenant model or a thunk (`() => Store`) |
 | `relatedName` | Django's `<model>Set` | Reverse accessor on the tenant model; `'+'` hides it |
 | `uuidPk` | `false` | Add `id: UUIDField({ primaryKey: true, default: uuid7 })` |
+| `extends` | none | Abstract model to inherit from (e.g. `AbstractBaseUser`); its `objects` manager class is kept, scoped |
 
 `TenantModel` is the ready-made factory with `field: 'tenant'` and the target from `TENANTS.MODEL`. Start every
 index and unique constraint with the tenant field (`uniqueTogether: [['store', 'handle']]`).
 
 The tenant model itself (`Store`) is an ordinary model, not tenant-scoped.
+
+### Per-tenant users (a shop's customers)
+
+Shoppers belong to one store, so they are a tenant-scoped model, not `AUTH_USER_MODEL`. Extend `AbstractBaseUser`
+for passwords, and give them their own JWT type with `@ghuri/auth`'s `userModel()` hook:
+
+```ts
+import { AbstractBaseUser, AccessToken, RefreshToken } from '@ghuri/auth'
+import { JWTAuthentication } from '@ghuri/auth/rest'
+
+const CustomerModel = tenantModel({ field: 'store', to: () => Store, uuidPk: true, extends: AbstractBaseUser })
+
+export class Customer extends CustomerModel({ email: new EmailField(), isActive: new BooleanField({ default: true }) }) {
+  static Meta = { uniqueTogether: [['store', 'email']] }
+  static USERNAME_FIELD = 'email'
+}
+
+export class CustomerAccessToken extends AccessToken {
+  static tokenType = 'customer_access'
+  static userModel() { return Customer }
+}
+export class CustomerRefreshToken extends RefreshToken {
+  static tokenType = 'customer_refresh'
+  static accessTokenClass = CustomerAccessToken
+  static userModel() { return Customer }
+}
+export class CustomerJWTAuthentication extends JWTAuthentication {
+  tokenClasses = [CustomerAccessToken]
+}
+```
+
+`Customer.objects` is a scoped `UserManager`, so a login looks the email up in the request's store only. A token is
+read back through the same scoped manager, so a customer token issued by one store is rejected on another. Its own
+`tokenType` means it is never accepted as a platform-user token, and vice versa. Use `TokenRefreshView` and
+`TokenBlacklistView` with `tokenClass = CustomerRefreshToken` for refresh and logout.
 
 ## 3. The current tenant
 
@@ -154,7 +190,7 @@ With a tenant active:
 |---|---|
 | Reads (`fetch`, `get`, `count`, `exists`, `aggregate`, `values`, iteration) | `WHERE <tenant> = <current>` is added |
 | Subqueries (`filter({ pk__in: Product.objects.values('id') })`) | Scoped the same way |
-| Reverse relations, M2M managers, GraphQL | Scoped, because they read through `objects` |
+| Reverse relations, M2M managers, GraphQL, REST viewsets, agent tools | Scoped, because they read through `objects` |
 | `save()`, `create()` | Fills an empty tenant; refuses another tenant's object; refuses an explicit key that names another tenant's row |
 | Foreign keys to tenant-scoped models | Must point to the same tenant (checked on `save`, `create`, `bulkCreate`, `bulkUpdate`, `update`) |
 | `update(values)` | Scoped; refuses changing the tenant or pointing foreign keys at another tenant |
@@ -172,7 +208,7 @@ on a viewset is fine at import time and is scoped to each request.
 Each foreign key check is one `COUNT` query per field per write. Values already checked are remembered for the
 rest of the request or `runAsTenant()` block.
 
-## 6. Cache, UUIDv7 keys, GraphQL and REST
+## 6. Cache, UUIDv7 keys, GraphQL, REST and agents
 
 **Cache.** `tenantCache(alias = 'default')` wraps a configured cache and prefixes every key with `t:<tenant pk>:`.
 `clear()` deletes only this tenant's keys on backends that clear by prefix (memory, KV).
@@ -186,10 +222,18 @@ await cache.getOrSet('menu', () => buildMenu(), 300)
 `uuidPk: true`, keys stay unique across databases, so one tenant can later move to its own database without
 clashes.
 
-**GraphQL and REST.** `@ghuri/graphql` reads through the model's default manager, so root fields, connections,
-relations and `node(id:)` are scoped with no per-type code; another tenant's `node(id:)` resolves to `null` (see
-`test/graphql.test.ts`). `@ghuri/rest` generic views re-evaluate `queryset.all()` per request, so they should be
-scoped the same way; that path is not covered by this package's tests yet.
+**GraphQL, REST and agents.** They all read through the model's default manager, so they are scoped with no
+per-type code:
+
+- `@ghuri/graphql`: root fields, connections, relations and `node(id:)`; another tenant's `node(id:)` is `null`.
+- `@ghuri/rest`: viewsets (`queryset = Product.objects.all()` at import time is fine); another tenant's object is a
+  404, and a serializer foreign key to another tenant's row fails validation (400), because related fields look
+  up through the scoped `objects` too.
+- `@ghuri/agents`: `ModelTools` run as the current tenant (tested); the MCP endpoint runs them inside the request,
+  after `TenantMiddleware`.
+
+`CrossTenantError` is an HTTP 403 (`PermissionDenied`) when it reaches an error handler; `TenantNotSet` is a 500,
+because it means code ran without a tenant where one was required.
 
 ## 7. Testing for leaks
 
