@@ -21,6 +21,29 @@ import { uuid7 } from './uuid'
 const TENANT_FIELD = Symbol.for('ghuri.tenants.field')
 const RAW_STATE = Symbol('ghuri.tenants.rawState')
 const SCOPED_CACHE = Symbol('ghuri.tenants.scopedState')
+const OBJECTS = Symbol.for('ghuri.tenants.objects')
+const UNSCOPED = Symbol.for('ghuri.tenants.unscoped')
+
+/** A static accessor that prepares the model and binds one manager per concrete class on first use. */
+function managerAccessor(key: symbol, name: string, make: () => Manager<any>): PropertyDescriptor {
+  return {
+    get(this: ModelClass) {
+      const meta = this._meta
+      if (meta.abstract) throw new TypeError(`Manager isn't available; '${meta.objectName}' is abstract.`)
+      if (!Object.hasOwn(this, key)) {
+        const m = make()
+        m.contributeToClass(this, name)
+        Object.defineProperty(this, key, { value: m, configurable: true })
+      }
+      return (this as any)[key]
+    },
+    set(this: ModelClass, v: Manager<any>) {
+      Object.defineProperty(this, name, { value: v, writable: true, configurable: true })
+    },
+    configurable: true,
+  }
+}
+
 /** The tenant filters `TenantQuerySet` adds itself (never copied into chained QuerySets). */
 const SCOPE_FILTERS = new WeakSet<object>()
 
@@ -319,7 +342,14 @@ m2mChanged.connect(
 
 // ---- TenantModel factory ---------------------------------------------------------------------------------
 
-export interface TenantModelFactoryOptions<N extends string, M extends ModelClass, U extends boolean> {
+type AnyCtor = abstract new (...args: any) => any
+
+export interface TenantModelFactoryOptions<
+  N extends string,
+  M extends ModelClass,
+  U extends boolean,
+  B extends AnyCtor = typeof BaseModel,
+> {
   /** Name of the tenant foreign key added to every model (default `'tenant'`; column `<name>_id`). */
   field?: N
   /** The tenant model, or a thunk (default: `TENANTS.MODEL`, resolved when the relation is first used). */
@@ -328,10 +358,16 @@ export interface TenantModelFactoryOptions<N extends string, M extends ModelClas
   relatedName?: string
   /** Give every model a UUIDv7 primary key `id` instead of an auto-increment integer. */
   uuidPk?: U
+  /**
+   * Abstract model to inherit fields, Meta and methods from, e.g. `AbstractBaseUser` from `@ghuri/auth` for a
+   * tenant's customers (passwords, `lastLogin`). Its `objects` manager class is kept, scoped to the tenant (so
+   * `Customer.objects.createUser()` still works).
+   */
+  extends?: B
 }
 
 /** The class side every tenant-scoped model inherits: `objects` (scoped) and `unscoped` (every tenant). */
-export type TenantModelBase = typeof BaseModel & {
+export type TenantModelBase<B extends AnyCtor = typeof BaseModel> = B & {
   /** Every tenant's rows, no checks. For platform code; prefer `withoutTenant()`. */
   unscoped: Manager<any>
 }
@@ -341,12 +377,39 @@ type TenantFields<N extends string, M extends ModelClass, U extends boolean> = {
 } & (U extends true ? { id: UUIDField<{ primaryKey: true }> } : {})
 
 /** A `Model()`-like factory whose models are scoped to the current tenant. */
-export type TenantModelFactory<N extends string, M extends ModelClass, U extends boolean> = <
-  F extends FieldMap,
->(
+export type TenantModelFactory<
+  N extends string,
+  M extends ModelClass,
+  U extends boolean,
+  B extends AnyCtor = typeof BaseModel,
+> = <F extends FieldMap>(
   fields: F,
   options?: { meta?: ModelMeta },
-) => ModelBaseClass<F & TenantFields<N, M, U>, TenantModelBase>
+) => ModelBaseClass<F & TenantFields<N, M, U>, TenantModelBase<B>>
+
+/** The `objects` manager class an abstract base declares (`UserManager` for `AbstractBaseUser`), else `Manager`. */
+function inheritedManagerClass(cls: unknown): typeof Manager {
+  let c: any = cls
+  while (typeof c === 'function') {
+    const d = Object.getOwnPropertyDescriptor(c, 'objects')
+    if (d && 'value' in d && d.value instanceof Manager) return d.value.constructor as typeof Manager
+    c = Object.getPrototypeOf(c)
+  }
+  return Manager
+}
+
+/** `Base` with `getQueryset()` returning a `TenantQuerySet` (its other methods are kept). */
+function scopedManagerClass(Base: typeof Manager): typeof Manager {
+  if (Base === Manager) return TenantManager
+  const Scoped = class extends Base {
+    override getQueryset(): QuerySet<any> {
+      this.assertBound()
+      return new TenantQuerySet(this.model)
+    }
+  }
+  Object.defineProperty(Scoped, 'name', { value: `Tenant${Base.name}` })
+  return Scoped
+}
 
 /**
  * Build a `TenantModel` factory for your project:
@@ -364,7 +427,8 @@ export function tenantModel<
   N extends string = 'tenant',
   M extends ModelClass = ModelClass,
   U extends boolean = false,
->(options: TenantModelFactoryOptions<N, M, U> = {}): TenantModelFactory<N, M, U> {
+  B extends AnyCtor = typeof BaseModel,
+>(options: TenantModelFactoryOptions<N, M, U, B> = {}): TenantModelFactory<N, M, U, B> {
   const field = (options.field ?? 'tenant') as N
   const to = options.to ?? (() => getTenantModel<M>())
   const base: FieldMap = {
@@ -375,10 +439,14 @@ export function tenantModel<
   }
   if (options.uuidPk) base.id = new UUIDField({ primaryKey: true, default: uuid7, editable: false })
 
-  class TenantBase extends Model(base) {
+  const ObjectsManager = scopedManagerClass(inheritedManagerClass(options.extends))
+
+  const Parent = Model(
+    base,
+    options.extends ? { extends: options.extends as any } : {},
+  ) as unknown as typeof BaseModel
+  class TenantBase extends Parent {
     static Meta: ModelMeta = { abstract: true }
-    static objects = new TenantManager()
-    static unscoped = new Manager()
 
     override async save(opts?: SaveOptions): Promise<void> {
       await checkSave(this, field)
@@ -386,9 +454,26 @@ export function tenantModel<
     }
   }
   Object.defineProperty(TenantBase, TENANT_FIELD, { value: field })
+  // Lazy, per concrete class (like the ORM's implicit `objects`): usable before the model is prepared, e.g. in
+  // `queryset = Product.objects.all()` on a viewset at import time. A subclass may still declare its own managers.
+  Object.defineProperty(
+    TenantBase,
+    'objects',
+    managerAccessor(OBJECTS, 'objects', () => new ObjectsManager()),
+  )
+  Object.defineProperty(
+    TenantBase,
+    'unscoped',
+    managerAccessor(UNSCOPED, 'unscoped', () => new Manager()),
+  )
 
   return (<F extends FieldMap>(fields: F, opts: { meta?: ModelMeta } = {}) =>
-    Model(fields, { extends: TenantBase as any, meta: opts.meta })) as unknown as TenantModelFactory<N, M, U>
+    Model(fields, { extends: TenantBase as any, meta: opts.meta })) as unknown as TenantModelFactory<
+    N,
+    M,
+    U,
+    B
+  >
 }
 
 /**
