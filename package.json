@@ -1,6 +1,6 @@
 {
   "name": "@ghuri/tenants",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.1",
   "description": "Ghuri tenants: shared-schema multi-tenancy with fail-closed, tenant-scoped models, managers and QuerySets",
   "type": "module",
   "license": "MIT",
@@ -28,17 +28,17 @@
   },
   "peerDependencies": {
     "@ghuri/core": "^0.1.0-alpha.1",
-    "@ghuri/orm": "^0.1.0-alpha.1",
+    "@ghuri/orm": "^0.1.0-alpha.3",
     "hono": "^4.13.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.6",
     "@electric-sql/pglite": "^0.5.16",
     "@ghuri/agents": "^0.1.0-alpha.1",
-    "@ghuri/auth": "^0.1.0-alpha.3",
+    "@ghuri/auth": "^0.1.0-alpha.4",
     "@ghuri/core": "^0.1.0-alpha.1",
     "@ghuri/graphql": "^0.1.0-alpha.0",
-    "@ghuri/orm": "^0.1.0-alpha.1",
+    "@ghuri/orm": "^0.1.0-alpha.3",
     "@ghuri/rest": "^0.1.0-alpha.1",
     "@types/node": "^24.0.0",
     "ai": "^7.0.0",
