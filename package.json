@@ -1,6 +1,6 @@
 {
   "name": "@ghuri/tenants",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Ghuri tenants: shared-schema multi-tenancy with fail-closed, tenant-scoped models, managers and QuerySets",
   "type": "module",
   "license": "MIT",
