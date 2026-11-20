@@ -2,6 +2,7 @@
 // and managers, QuerySets and writes are scoped to the current tenant, failing closed when there is none.
 
 export { type TenantCache, tenantCache } from './cache'
+export { TENANT_CARRIER, tenantCarrier } from './carrier'
 export {
   activateTenant,
   currentTenant,

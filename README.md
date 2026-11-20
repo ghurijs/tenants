@@ -240,7 +240,12 @@ per-type code:
   404, and a serializer foreign key to another tenant's row fails validation (400), because related fields look
   up through the scoped `objects` too.
 - `@ghuri/agents`: `ModelTools` run as the current tenant (tested); the MCP endpoint runs them inside the request,
-  after `TenantMiddleware`.
+  after `TenantMiddleware`; queued runs (`enqueue()`) run as the tenant that enqueued them.
+
+**Taking the tenant along.** `@ghuri/tenants` registers a `tenant` context carrier with `@ghuri/core`:
+`captureContext()` returns `{ tenant: '<pk>' }` and `restoreContext(captured, fn)` runs `fn` as that tenant
+(`TenantNotFound` if it was deleted). Put the captured object in queue messages instead of passing tenant ids by hand.
+`withoutTenant()` is not carried.
 
 `CrossTenantError` is an HTTP 403 (`PermissionDenied`) when it reaches an error handler; `TenantNotSet` is a 500,
 because it means code ran without a tenant where one was required.

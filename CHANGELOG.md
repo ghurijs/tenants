@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `tenantCarrier` (registered with `@ghuri/core`'s context carriers as `tenant`): `captureContext()` records the
+  current tenant's primary key and `restoreContext()` loads that tenant and runs the work inside `runAsTenant()`
+  (`TenantNotFound` when it no longer exists). `withoutTenant()` is not carried. With an older `@ghuri/core` that has
+  no carrier registry, nothing is registered and everything else works as before. Also exported: `TENANT_CARRIER`.
+- docs and tests: tenant-scoped agent conversations with `@ghuri/agents`' `AGENTS.CONVERSATION_MODEL`
+  (`StoreModel({ ...conversationFields })`): another store's conversation is a 404, including when swapping in a
+  project that already has conversations.
+
 ## 0.1.0-alpha.2
 
 - **Behaviour change:** `requestHost()`, and so `SubdomainResolver` and `HostResolver`, no longer trust
