@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.3
 
 - `tenantCarrier` (registered with `@ghuri/core`'s context carriers as `tenant`): `captureContext()` records the
   current tenant's primary key and `restoreContext()` loads that tenant and runs the work inside `runAsTenant()`
