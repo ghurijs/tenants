@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `tenantNotRequired(view)` (Django's `login_not_required`, for `TENANTS.REQUIRED`): a marked view or mounted Hono
+  app runs with no tenant instead of answering 404 when no resolver finds one, for requests that carry no tenant
+  such as payment webhooks. A tenant the resolvers do find is still activated, an unknown one is still a 404, and
+  tenant-scoped queries in the view still fail closed. The marker is `Symbol.for('ghuri.tenantNotRequired')`
+  (exported as `TENANT_NOT_REQUIRED_MARKER`), so packages mark their views without importing `@ghuri/tenants`;
+  `@ghuri/billing` marks its webhook view. Also exported: `isTenantNotRequired(c)`.
+
 ## 0.1.0-alpha.3
 
 - `tenantCarrier` (registered with `@ghuri/core`'s context carriers as `tenant`): `captureContext()` records the

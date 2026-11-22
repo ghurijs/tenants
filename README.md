@@ -185,6 +185,17 @@ Every resolver takes `filter` (`{ isActive: true }`) and `model` (default `TENAN
 the request runs without one, so platform routes keep working, unless `TENANTS.REQUIRED` (or
 `new TenantMiddleware({ required: true })`) asks for a 404. The tenant is also `c.get('tenant')`.
 
+With `REQUIRED`, mark the views that legitimately arrive without a tenant (a payment provider's webhook, a health
+check) with `tenantNotRequired(view)`, like Django's `login_not_required`. They run with no tenant (tenant-scoped
+queries still fail closed); a tenant the resolvers find is still activated, and an unknown one is still a 404.
+`@ghuri/billing`'s webhook view is marked already.
+
+```ts
+import { tenantNotRequired } from '@ghuri/tenants'
+
+path('healthz/', tenantNotRequired(healthView))
+```
+
 A resolver only says which tenant the request is for. Whether the signed-in user may act for that tenant is a
 permission check: compare `request.user` with your membership model in a permission class.
 

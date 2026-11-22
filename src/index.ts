@@ -15,7 +15,13 @@ export {
   withoutTenant,
 } from './context'
 export { CrossTenantError, TenantNotFound, TenantNotSet } from './errors'
-export { TenantMiddleware, type TenantMiddlewareOptions } from './middleware'
+export {
+  isTenantNotRequired,
+  TENANT_NOT_REQUIRED_MARKER,
+  TenantMiddleware,
+  type TenantMiddlewareOptions,
+  tenantNotRequired,
+} from './middleware'
 export {
   isTenantModel,
   TenantManager,

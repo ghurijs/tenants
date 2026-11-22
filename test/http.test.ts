@@ -8,8 +8,10 @@ import {
   HostResolver,
   runAsTenant,
   SubdomainResolver,
+  TENANT_NOT_REQUIRED_MARKER,
   TenantMiddleware,
   tenantCache,
+  tenantNotRequired,
 } from '../src'
 import { seed, type World } from './helpers'
 import { allModels, Product, Store } from './models'
@@ -100,5 +102,76 @@ describe('TenantMiddleware and resolvers', () => {
     await runAsTenant(w.a, async () =>
       expect(tenantCache().makeKey('visits')).toContain(`t:${w.a.pk}:visits`),
     )
+  })
+})
+
+describe('TENANTS.REQUIRED and tenantNotRequired()', () => {
+  let app: GhuriApp
+  let db: TestDatabase
+  let client: TestClient
+  const env: Record<string, unknown> = {}
+  // A fresh function per route: tenantNotRequired() marks the function it is given.
+  const whoami = () => (c: any) => c.json({ store: currentTenant()?.slug ?? null })
+
+  beforeAll(async () => {
+    const settings = defineSettings(() => ({
+      SECRET_KEY: 'test-secret',
+      DEBUG: false,
+      INSTALLED_APPS: [],
+      ROOT_URLCONF: [
+        path('whoami/', whoami()),
+        path('hooks/stripe/', tenantNotRequired(whoami())),
+        path(
+          'hooks/products/',
+          tenantNotRequired(async (c) => c.json(await Product.objects.count())),
+        ),
+        path('hooks/<int:id>/', tenantNotRequired(whoami())),
+      ],
+      MIDDLEWARE: [TenantMiddleware],
+      TENANTS: {
+        MODEL: Store,
+        REQUIRED: true,
+        RESOLVERS: [new HeaderResolver({ header: 'X-Storefront-Token', field: 'token' })],
+      },
+    }))
+    app = createApp(settings as any, { checks: false })
+    await app.setup(env)
+    db = await setupTestDatabase({ using: 'sqlite', models: allModels })
+    client = createTestClient(app, { env })
+  }, 60_000)
+  afterAll(async () => {
+    await db?.teardown()
+  })
+  beforeEach(async () => {
+    await db.flush()
+    await seed()
+  })
+
+  it('answers 404 without a tenant, except for views marked tenantNotRequired()', async () => {
+    expect((await client.get('/whoami/')).status).toBe(404)
+    expect(await (await client.get('/hooks/stripe/')).json()).toEqual({ store: null })
+    expect(await (await client.post('/hooks/stripe/', { csrf: false } as any)).json()).toEqual({
+      store: null,
+    })
+    expect(await (await client.get('/hooks/7/')).json()).toEqual({ store: null })
+  })
+
+  it('still activates a tenant on marked views, and still answers 404 for an unknown one', async () => {
+    const res = await client.get('/hooks/stripe/', { headers: { 'X-Storefront-Token': 'tok-b' } })
+    expect(await res.json()).toEqual({ store: 'bshop' })
+    expect((await client.get('/hooks/stripe/', { headers: { 'X-Storefront-Token': 'nope' } })).status).toBe(
+      404,
+    )
+  })
+
+  it('keeps tenant-scoped queries fail-closed on a marked view with no tenant', async () => {
+    expect((await client.get('/hooks/products/')).status).toBe(500)
+  })
+
+  it('marks with a Symbol.for() key, so packages can mark views without importing tenants', () => {
+    const view = () => new Response()
+    ;(view as any)[Symbol.for('ghuri.tenantNotRequired')] = true
+    expect(TENANT_NOT_REQUIRED_MARKER).toBe(Symbol.for('ghuri.tenantNotRequired'))
+    expect((tenantNotRequired(() => new Response()) as any)[TENANT_NOT_REQUIRED_MARKER]).toBe(true)
   })
 })
