@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0-alpha.4
 
 - `tenantNotRequired(view)` (Django's `login_not_required`, for `TENANTS.REQUIRED`): a marked view or mounted Hono
   app runs with no tenant instead of answering 404 when no resolver finds one, for requests that carry no tenant
